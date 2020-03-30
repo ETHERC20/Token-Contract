@@ -55,7 +55,6 @@ library SafeMath {
     }
 }
 
-
 contract ERC20 is IERC20 {
     using SafeMath for uint256;
 
@@ -143,35 +142,230 @@ contract ERC20 is IERC20 {
 }
 
 
-contract TokenName is ERC20 {
-
+contract ERC20Detailed is IERC20 {
     string private _name;
     string private _symbol;
     uint8 private _decimals;
 
-    constructor(string memory name, string memory symbol, uint8 decimals, uint256 totalSupply, address payable feeReceiver, address tokenOwnerAddress) public payable {
-      _name = name;
-      _symbol = symbol;
-      _decimals = decimals;
-
-      _mint(tokenOwnerAddress, totalSupply);
-
-      feeReceiver.transfer(msg.value);
-    }
-
-    function burn(uint256 value) public {
-      _burn(msg.sender, value);
+    constructor (string memory name, string memory symbol, uint8 decimals) public {
+        _name = name;
+        _symbol = symbol;
+        _decimals = decimals;
     }
 
     function name() public view returns (string memory) {
-      return _name;
+        return _name;
     }
 
     function symbol() public view returns (string memory) {
-      return _symbol;
+        return _symbol;
     }
 
     function decimals() public view returns (uint8) {
-      return _decimals;
+        return _decimals;
+    }
+}
+
+
+library Roles {
+    struct Role {
+        mapping (address => bool) bearer;
+    }
+
+    function add(Role storage role, address account) internal {
+        require(!has(role, account), "Roles: account already has role");
+        role.bearer[account] = true;
+    }
+
+    function remove(Role storage role, address account) internal {
+        require(has(role, account), "Roles: account does not have role");
+        role.bearer[account] = false;
+    }
+
+    function has(Role storage role, address account) internal view returns (bool) {
+        require(account != address(0), "Roles: account is the zero address");
+        return role.bearer[account];
+    }
+}
+
+
+contract MinterRole {
+    using Roles for Roles.Role;
+
+    event MinterAdded(address indexed account);
+    event MinterRemoved(address indexed account);
+
+    Roles.Role private _minters;
+
+    constructor () internal {
+        _addMinter(msg.sender);
+    }
+
+    modifier onlyMinter() {
+        require(isMinter(msg.sender), "MinterRole: caller does not have the Minter role");
+        _;
+    }
+
+    function isMinter(address account) public view returns (bool) {
+        return _minters.has(account);
+    }
+
+    function addMinter(address account) public onlyMinter {
+        _addMinter(account);
+    }
+
+    function renounceMinter() public {
+        _removeMinter(msg.sender);
+    }
+
+    function _addMinter(address account) internal {
+        _minters.add(account);
+        emit MinterAdded(account);
+    }
+
+    function _removeMinter(address account) internal {
+        _minters.remove(account);
+        emit MinterRemoved(account);
+    }
+}
+
+
+contract ERC20Mintable is ERC20, MinterRole {
+    
+    function mint(address account, uint256 amount) public onlyMinter returns (bool) {
+        _mint(account, amount);
+        return true;
+    }
+}
+
+contract ERC20Burnable is ERC20 {
+    
+    function burn(uint256 amount) public {
+        _burn(msg.sender, amount);
+    }
+
+    function burnFrom(address account, uint256 amount) public {
+        _burnFrom(account, amount);
+    }
+}
+
+contract Context {
+    
+    constructor () internal { }
+
+    function _msgSender() internal view returns (address payable) {
+        return msg.sender;
+    }
+
+    function _msgData() internal view returns (bytes memory) {
+        this;
+        return msg.data;
+    }
+}
+
+contract PauserRole is Context {
+    using Roles for Roles.Role;
+
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
+
+    Roles.Role private _pausers;
+
+    constructor () internal {
+        _addPauser(_msgSender());
+    }
+
+    modifier onlyPauser() {
+        require(isPauser(_msgSender()), "PauserRole: caller does not have the Pauser role");
+        _;
+    }
+
+    function isPauser(address account) public view returns (bool) {
+        return _pausers.has(account);
+    }
+
+    function addPauser(address account) public onlyPauser {
+        _addPauser(account);
+    }
+
+    function renouncePauser() public {
+        _removePauser(_msgSender());
+    }
+
+    function _addPauser(address account) internal {
+        _pausers.add(account);
+        emit PauserAdded(account);
+    }
+
+    function _removePauser(address account) internal {
+        _pausers.remove(account);
+        emit PauserRemoved(account);
+    }
+}
+
+contract Pausable is Context, PauserRole {
+    
+    event Paused(address account);
+
+    event Unpaused(address account);
+
+    bool private _paused;
+
+    constructor () internal {
+        _paused = false;
+    }
+
+    function paused() public view returns (bool) {
+        return _paused;
+    }
+
+    modifier whenNotPaused() {
+        require(!_paused, "Pausable: paused");
+        _;
+    }
+
+    modifier whenPaused() {
+        require(_paused, "Pausable: not paused");
+        _;
+    }
+
+    function pause() public onlyPauser whenNotPaused {
+        _paused = true;
+        emit Paused(_msgSender());
+    }
+
+    function unpause() public onlyPauser whenPaused {
+        _paused = false;
+        emit Unpaused(_msgSender());
+    }
+}
+
+contract ERC20Pausable is ERC20, Pausable {
+    function transfer(address to, uint256 value) public whenNotPaused returns (bool) {
+        return super.transfer(to, value);
+    }
+
+    function transferFrom(address from, address to, uint256 value) public whenNotPaused returns (bool) {
+        return super.transferFrom(from, to, value);
+    }
+
+    function approve(address spender, uint256 value) public whenNotPaused returns (bool) {
+        return super.approve(spender, value);
+    }
+
+    function increaseAllowance(address spender, uint256 addedValue) public whenNotPaused returns (bool) {
+        return super.increaseAllowance(spender, addedValue);
+    }
+
+    function decreaseAllowance(address spender, uint256 subtractedValue) public whenNotPaused returns (bool) {
+        return super.decreaseAllowance(spender, subtractedValue);
+    }
+}
+
+
+contract MyTestToken is ERC20, ERC20Detailed, ERC20Mintable, ERC20Burnable, ERC20Pausable {
+
+    constructor () public ERC20Detailed("MyTestToken", "MTT", 18) {
+        _mint(msg.sender, 100000000 * (10 ** uint256(decimals())));
     }
 }
